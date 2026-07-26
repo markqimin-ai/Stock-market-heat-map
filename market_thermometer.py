@@ -317,6 +317,7 @@ def fetch_market_data():
                     data["main_flow_trend"] = "净流入" if total_net > 0 else "净流出"
                     data["main_flow_date"] = datetime.now().strftime("%Y-%m-%d")
                     main_flow_ok = True
+                    data["errors"] = [e for e in data["errors"] if "主力资金流向" not in e]
             except Exception as e:
                 data["errors"].append(f"行业资金流汇总(解析): {e}")
 
@@ -359,6 +360,7 @@ def fetch_market_data():
                     data["breadth"] = "普涨" if up_count > down_count * 2 else ("普跌" if down_count > up_count * 2 else "分化")
                     data["breadth_date"] = stat_date
                     limit_ok = True
+                    data["errors"] = [e for e in data["errors"] if "全市场行情" not in e]
             except Exception as e:
                 data["errors"].append(f"市场活跃度(解析): {e}")
 
@@ -391,6 +393,7 @@ def fetch_market_data():
             data["breadth_date"] = zt_date if zt_date else datetime.now().strftime("%Y-%m-%d")
             data["up_down_count"] = "—"
             limit_ok = True
+            data["errors"] = [e for e in data["errors"] if "全市场行情" not in e]
 
     # 房价（百城）
     house_df = _try("百城房价", lambda: ak.macro_china_real_estate())
