@@ -286,30 +286,91 @@ def fetch_market_data():
             data["new_fund_trend"] = "偏暖" if monthly.iloc[-1] > 1000 else "偏冷"
             data["new_fund_date"] = str(monthly.index[-1])
 
-    # 主力资金净流入（近5日均值）
+    # 主力资金净流入（近5日均值）— 主方案：市场资金流向
     flow_df = _try("主力资金流向", lambda: ak.stock_market_fund_flow())
+    main_flow_ok = False
     if flow_df is not None:
-        flow_df["日期"] = pd.to_datetime(flow_df["日期"])
-        flow_df = flow_df.sort_values("日期")
-        recent5 = pd.to_numeric(flow_df["主力净流入-净额"].tail(5), errors="coerce").dropna()
-        if len(recent5) > 0:
-            data["main_flow_5d"] = float(recent5.mean())
-            data["main_flow_trend"] = "净流入" if data["main_flow_5d"] > 0 else "净流出"
-            data["main_flow_date"] = flow_df["日期"].iloc[-1].strftime("%Y-%m-%d")
+        try:
+            date_col = _pick_col(flow_df, ["日期", "date"])
+            flow_col = _pick_col(flow_df, ["主力净流入-净额", "主力净流入", "主力净额", "main_net_inflow"])
+            flow_df[date_col] = pd.to_datetime(flow_df[date_col])
+            flow_df = flow_df.sort_values(date_col)
+            recent5 = pd.to_numeric(flow_df[flow_col].tail(5), errors="coerce").dropna()
+            if len(recent5) > 0:
+                data["main_flow_5d"] = float(recent5.mean())
+                data["main_flow_trend"] = "净流入" if data["main_flow_5d"] > 0 else "净流出"
+                data["main_flow_date"] = flow_df[date_col].iloc[-1].strftime("%Y-%m-%d")
+                main_flow_ok = True
+        except Exception as e:
+            data["errors"].append(f"主力资金流向(解析): {e}")
 
-    # 涨跌停家数/涨跌比
+    # 主力资金备选：大单资金流汇总
+    if not main_flow_ok:
+        big_deal_df = _try("大单资金流", lambda: ak.stock_fund_flow_big_deal())
+        if big_deal_df is not None:
+            try:
+                date_col = _pick_col(big_deal_df, ["日期", "date"])
+                net_col = _pick_col(big_deal_df, ["净流入", "净额", "net", "net_inflow"])
+                big_deal_df[date_col] = pd.to_datetime(big_deal_df[date_col])
+                big_deal_df = big_deal_df.sort_values(date_col)
+                recent5 = pd.to_numeric(big_deal_df[net_col].tail(5), errors="coerce").dropna()
+                if len(recent5) > 0:
+                    data["main_flow_5d"] = float(recent5.mean())
+                    data["main_flow_trend"] = "净流入" if data["main_flow_5d"] > 0 else "净流出"
+                    data["main_flow_date"] = big_deal_df[date_col].iloc[-1].strftime("%Y-%m-%d")
+                    main_flow_ok = True
+            except Exception as e:
+                data["errors"].append(f"大单资金流(解析): {e}")
+
+    # 涨跌停家数/涨跌比 — 主方案：全市场行情快照
     spot_df = _try("全市场行情", lambda: ak.stock_zh_a_spot_em())
+    limit_ok = False
     if spot_df is not None:
-        chg = pd.to_numeric(spot_df["涨跌幅"], errors="coerce").dropna()
-        if len(chg) > 0:
-            limit_up = int((chg >= 9.9).sum())
-            limit_down = int((chg <= -9.9).sum())
-            up_count = int((chg > 0).sum())
-            down_count = int((chg < 0).sum())
+        try:
+            chg_col = _pick_col(spot_df, ["涨跌幅", "change_pct", "pct_chg"])
+            chg = pd.to_numeric(spot_df[chg_col], errors="coerce").dropna()
+            if len(chg) > 0:
+                limit_up = int((chg >= 9.9).sum())
+                limit_down = int((chg <= -9.9).sum())
+                up_count = int((chg > 0).sum())
+                down_count = int((chg < 0).sum())
+                data["limit_up_down"] = f"涨停{limit_up}/跌停{limit_down}"
+                data["up_down_count"] = f"上涨{up_count}/下跌{down_count}"
+                data["breadth"] = "普涨" if up_count > down_count * 2 else ("普跌" if down_count > up_count * 2 else "分化")
+                data["breadth_date"] = datetime.now().strftime("%Y-%m-%d")
+                limit_ok = True
+        except Exception as e:
+            data["errors"].append(f"全市场行情(解析): {e}")
+
+    # 涨跌停备选方案：涨停池 + 跌停池接口（数据量小，更稳定）
+    if not limit_ok:
+        today = datetime.now().strftime("%Y%m%d")
+        yesterday = (datetime.now() - pd.Timedelta(days=1)).strftime("%Y%m%d")
+        limit_up = 0
+        limit_down = 0
+        zt_date = None
+
+        for date_str in [today, yesterday]:
+            try:
+                zt_df = _try(f"涨停池({date_str})", lambda d=date_str: ak.stock_zt_pool_em(date=d))
+                dt_df = _try(f"跌停池({date_str})", lambda d=date_str: ak.stock_zt_pool_dtgc_em(date=d))
+                if zt_df is not None:
+                    limit_up = len(zt_df)
+                if dt_df is not None:
+                    limit_down = len(dt_df)
+                zt_date = date_str
+                if limit_up > 0 or limit_down > 0:
+                    break
+            except Exception as e:
+                data["errors"].append(f"涨跌停备选({date_str}): {e}")
+                continue
+
+        if limit_up > 0 or limit_down > 0:
             data["limit_up_down"] = f"涨停{limit_up}/跌停{limit_down}"
-            data["up_down_count"] = f"上涨{up_count}/下跌{down_count}"
-            data["breadth"] = "普涨" if up_count > down_count * 2 else ("普跌" if down_count > up_count * 2 else "分化")
-            data["breadth_date"] = datetime.now().strftime("%Y-%m-%d")
+            data["breadth"] = "普涨" if limit_up > limit_down * 2 else ("普跌" if limit_down > limit_up * 2 else "分化")
+            data["breadth_date"] = zt_date if zt_date else datetime.now().strftime("%Y-%m-%d")
+            data["up_down_count"] = "—"
+            limit_ok = True
 
     # 房价（百城）
     house_df = _try("百城房价", lambda: ak.macro_china_real_estate())
