@@ -456,15 +456,16 @@ def fetch_market_data():
 
 data = fetch_market_data()
 
-# ---------------- 综合热度（基于原三项核心指标） ----------------
+# ---------------- 综合热度1：核心3指标（PE/融资余额/国债收益率） ----------------
 parts, weights = [], []
 for key, w in [("pe_pct", 0.4), ("margin_pct", 0.3), ("yield_pct", 0.3)]:
     v = data.get(key, float("nan"))
     if not (v is None or np.isnan(v)):
         parts.append(v * w)
         weights.append(w)
-heat_score = sum(parts) / sum(weights) if weights else 50.0
-heat_score = float(np.clip(heat_score, 0, 100))
+heat_core = sum(parts) / sum(weights) if weights else 50.0
+heat_core = float(np.clip(heat_core, 0, 100))
+heat_score = heat_core  # 保留原变量名兼容
 
 # ---------------- 温度计 ----------------
 fig = go.Figure(go.Indicator(
@@ -676,7 +677,156 @@ indicators = [
      "diag_type": "custom", "fn": lambda v, d: d.get("fx_trend", "—")},
 ]
 
-# 构建展示表
+# ---------------- 综合热度2：全指标多维度（基于indicators计算） ----------------
+def _ind_to_score(spec, data_dict):
+    key = spec.get("key")
+    val = data_dict.get(key) if key else None
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return None
+    dtype = spec.get("diag_type")
+    if dtype == "threshold":
+        hot = spec["hot"]
+        cold = spec["cold"]
+        hot_is_high = spec.get("hot_is_high", True)
+        if hot_is_high:
+            if val >= hot:
+                return 90
+            elif val <= cold:
+                return 20
+            else:
+                return 20 + (val - cold) / (hot - cold) * 70
+        else:
+            if val <= hot:
+                return 90
+            elif val >= cold:
+                return 20
+            else:
+                return 20 + (cold - val) / (cold - hot) * 70
+    elif dtype == "percentile":
+        pct = data_dict.get(spec["pct_key"], float("nan"))
+        if pct is None or np.isnan(pct):
+            return None
+        hot_label = spec["hot_label"]
+        if hot_label in ["偏紧", "飙升", "泡沫", "亢奋"]:
+            return float(pct)
+        else:
+            return float(100 - pct)
+    elif dtype == "custom":
+        diag = spec["fn"](val, data_dict)
+        hot_words = ["扩张", "活跃", "旺盛", "企稳回升", "宽松", "站上均线", "亢奋", "泡沫",
+                     "偏暖", "净流入", "放量", "普涨", "飙升", "贬值", "高风险", "成长占优", "小盘占优"]
+        cold_words = ["收缩", "疲软", "下跌", "下行", "偏紧", "跌破均线", "低迷", "低估",
+                      "偏冷", "净流出", "缩量", "普跌", "低位", "升值", "安全", "价值占优", "大盘占优"]
+        if diag in hot_words:
+            return 80
+        elif diag in cold_words:
+            return 30
+        else:
+            return 55
+    return None
+
+
+dim_weights = {"宏观": 0.20, "资金": 0.25, "走势": 0.25, "情绪": 0.20, "风险": 0.10}
+dim_scores = {}
+dim_details = []
+for ind in indicators:
+    dim = ind["维度"]
+    score = _ind_to_score(ind, data)
+    if score is not None:
+        dim_scores.setdefault(dim, []).append(score)
+        dim_details.append({"维度": dim, "指标": ind["核心指标"], "热度分": round(score, 1)})
+
+dim_avg = {}
+total_w = 0
+total_score = 0
+for dim, w in dim_weights.items():
+    if dim in dim_scores and len(dim_scores[dim]) > 0:
+        avg = np.mean(dim_scores[dim])
+        dim_avg[dim] = float(avg)
+        total_score += avg * w
+        total_w += w
+
+heat_full = total_score / total_w if total_w > 0 else 50.0
+heat_full = float(np.clip(heat_full, 0, 100))
+
+# 双热度对比展示
+st.divider()
+st.subheader("🌡️ 双维度市场热度对比")
+st.caption("两种计算方式对比，交叉验证市场温度。核心3指标聚焦估值+情绪+利率，全指标20+项覆盖宏观/资金/走势/情绪/风险5大维度。")
+
+col_a, col_b = st.columns(2)
+with col_a:
+    fig_core = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=heat_core,
+        title={"text": "核心3指标热度"},
+        gauge={
+            "axis": {"range": [0, 100]},
+            "bar": {"color": "#1f77b4"},
+            "steps": [
+                {"range": [0, 30], "color": "#90EE90"},
+                {"range": [30, 70], "color": "#F0E68C"},
+                {"range": [70, 100], "color": "#F08080"},
+            ],
+        },
+    ))
+    fig_core.update_layout(height=300, margin=dict(l=20, r=20, t=50, b=20))
+    st.plotly_chart(fig_core, use_container_width=True)
+    st.markdown("**PE(40%) + 融资余额(30%) + 国债收益率(30%)**")
+    st.caption("经典框架：估值贵贱 + 杠杆情绪 + 资本环境")
+
+with col_b:
+    fig_full = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=heat_full,
+        title={"text": "全指标多维度热度"},
+        gauge={
+            "axis": {"range": [0, 100]},
+            "bar": {"color": "#ff7f0e"},
+            "steps": [
+                {"range": [0, 30], "color": "#90EE90"},
+                {"range": [30, 70], "color": "#F0E68C"},
+                {"range": [70, 100], "color": "#F08080"},
+            ],
+        },
+    ))
+    fig_full.update_layout(height=300, margin=dict(l=20, r=20, t=50, b=20))
+    st.plotly_chart(fig_full, use_container_width=True)
+    st.markdown(f"**宏观(20%) + 资金(25%) + 走势(25%) + 情绪(20%) + 风险(10%)**")
+    st.caption("全面视角：覆盖基本面/资金面/技术面/情绪面/风险面")
+
+diff = heat_full - heat_core
+st.markdown(f"**差值：全指标 - 核心 = {diff:+.1f}**")
+if abs(diff) < 10:
+    st.info(f"两种方式结论基本一致（差值{diff:+.1f}），市场温度信号可靠。")
+elif diff > 0:
+    st.warning(f"全指标热度比核心指标高{diff:.1f}分。说明除了估值/利率/杠杆之外，其他维度（宏观/情绪/风险）更偏热，需注意结构性过热风险。")
+else:
+    st.success(f"全指标热度比核心指标低{-diff:.1f}分。说明虽然核心3项看起来还行，但其他维度（宏观/情绪/风险）偏冷，可能存在隐忧。")
+
+# 各维度热度雷达图
+if dim_avg:
+    st.markdown("**📊 各维度热度拆解**")
+    dim_names = list(dim_avg.keys())
+    dim_vals = [round(v, 1) for v in dim_avg.values()]
+    dim_counts_list = [len(dim_scores[d]) for d in dim_names]
+    fig_radar = go.Figure(data=go.Bar(
+        x=dim_names,
+        y=dim_vals,
+        text=[f"{v:.1f}" for v in dim_vals],
+        textposition='auto',
+        marker_color=['#2ca02c', '#1f77b4', '#9467bd', '#ff7f0e', '#d62728'],
+    ))
+    fig_radar.update_layout(
+        yaxis=dict(range=[0, 100], title="热度分"),
+        height=350,
+        margin=dict(l=40, r=20, t=20, b=20),
+    )
+    st.plotly_chart(fig_radar, use_container_width=True)
+    with st.expander("📋 各指标详细热度分", expanded=False):
+        st.dataframe(pd.DataFrame(dim_details), use_container_width=True, hide_index=True)
+
+# ==================== 完整指标体系 ====================
 display_rows = []
 for ind in indicators:
     cur_val, diag = _threshold_diag(ind)
