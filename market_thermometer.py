@@ -271,7 +271,7 @@ def fetch_market_data():
         if len(gz_a) > 0:
             amount = float(pd.to_numeric(gz_a["成交额"].iloc[0], errors="coerce"))
             data["market_volume"] = amount
-            data["market_volume_trend"] = "放量" if amount > 10000 else "缩量"
+            data["market_volume_trend"] = "放量" if amount > 20000 else ("缩量" if amount < 8000 else "平稳")
             data["market_volume_date"] = datetime.now().strftime("%Y-%m-%d")
 
     # 新基金发行份额
@@ -571,18 +571,18 @@ indicators = [
      "diag_type": "threshold", "hot": 50, "cold": 50, "hot_label": "扩张", "cold_label": "收缩", "hot_is_high": True},
 
     {"维度": "宏观", "核心指标": "工业增加值同比", "数据源": "国家统计局",
-     "积极区间": ">6%", "消极区间": "<4%", "信号解读": "反映生产端活跃度，过低暗示供应链或需求端疲软。",
+     "积极区间": ">5%", "消极区间": "<3%", "信号解读": "反映生产端活跃度，过低暗示供应链或需求端疲软。",
      "key": "industrial_yoy", "fmt": lambda v: f"{v:.2f}%",
-     "diag_type": "threshold", "hot": 6, "cold": 4, "hot_label": "活跃", "cold_label": "疲软", "hot_is_high": True},
+     "diag_type": "threshold", "hot": 5, "cold": 3, "hot_label": "活跃", "cold_label": "疲软", "hot_is_high": True},
 
     {"维度": "宏观", "核心指标": "社消零售总额同比", "数据源": "国家统计局",
-     "积极区间": ">6%", "消极区间": "<4%", "信号解读": "反映内需消费能力，是经济转型的核心观测点。",
+     "积极区间": ">4%", "消极区间": "<2%", "信号解读": "反映内需消费能力，是经济转型的核心观测点。",
      "key": "retail_yoy", "fmt": lambda v: f"{v:.2f}%",
-     "diag_type": "threshold", "hot": 6, "cold": 4, "hot_label": "旺盛", "cold_label": "疲软", "hot_is_high": True},
+     "diag_type": "threshold", "hot": 4, "cold": 2, "hot_label": "旺盛", "cold_label": "疲软", "hot_is_high": True},
 
     # 资金
-    {"维度": "资金", "核心指标": "社融规模存量增速", "数据源": "人行/统计局",
-     "积极区间": "企稳回升 / 高于名义GDP", "消极区间": "持续下行", "信号解读": "实体经济的融资需求，反映未来经济活动的潜能。",
+    {"维度": "资金", "核心指标": "社融规模增量（月度）", "数据源": "人行/统计局",
+     "积极区间": "近3月均值>4万亿", "消极区间": "近3月均值<3万亿", "信号解读": "实体经济的融资需求，反映未来经济活动的潜能。",
      "key": "social_finance", "fmt": lambda v: f"{v:.0f} 亿",
      "diag_type": "custom", "fn": lambda v, d: d.get("social_finance_trend", "—")},
 
@@ -640,7 +640,7 @@ indicators = [
      "diag_type": "custom", "fn": lambda v, d: d.get("northboard_trend", "—")},
 
     {"维度": "情绪", "核心指标": "两市成交额", "数据源": "交易所(国证A指)",
-     "积极区间": "放量 (>1万亿)", "消极区间": "缩量 (<6000亿)", "信号解读": "量在价先。无量上涨难持续，地量往往见地价。",
+     "积极区间": "放量 (>2万亿)", "消极区间": "缩量 (<8000亿)", "信号解读": "量在价先。无量上涨难持续，地量往往见地价。",
      "key": "market_volume", "fmt": lambda v: f"{v:.0f} 亿" if not np.isnan(v) else "—",
      "diag_type": "custom", "fn": lambda v, d: d.get("market_volume_trend", "—")},
 
