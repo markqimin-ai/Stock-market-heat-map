@@ -122,6 +122,18 @@ def fetch_market_data():
                                           dates=margin_df[date_col])
         data["margin_date"] = margin_df[date_col].iloc[-1].strftime("%Y-%m-%d")
 
+    # 融资融券维持担保比例（杠杆风险指标）
+    margin_acct = _try("融资融券账户", lambda: ak.stock_margin_account_info())
+    if margin_acct is not None:
+        date_col = _pick_col(margin_acct, ["日期", "date"])
+        margin_acct[date_col] = pd.to_datetime(margin_acct[date_col])
+        margin_acct = margin_acct.sort_values(date_col)
+        ratio_series = pd.to_numeric(margin_acct["平均维持担保比例"], errors="coerce").dropna()
+        if len(ratio_series) > 0:
+            data["margin_ratio"] = float(ratio_series.iloc[-1])
+            data["margin_ratio_trend"] = "高风险" if data["margin_ratio"] < 200 else ("正常" if data["margin_ratio"] < 280 else "安全")
+            data["margin_ratio_date"] = margin_acct[date_col].iloc[-1].strftime("%Y-%m-%d")
+
     # ===== 资金维度 =====
     # 10Y 国债收益率
     bond_df = _try("国债收益率", lambda: ak.bond_zh_us_rate())
@@ -273,6 +285,31 @@ def fetch_market_data():
             data["new_fund_shares"] = float(monthly.iloc[-1])
             data["new_fund_trend"] = "偏暖" if monthly.iloc[-1] > 1000 else "偏冷"
             data["new_fund_date"] = str(monthly.index[-1])
+
+    # 主力资金净流入（近5日均值）
+    flow_df = _try("主力资金流向", lambda: ak.stock_market_fund_flow())
+    if flow_df is not None:
+        flow_df["日期"] = pd.to_datetime(flow_df["日期"])
+        flow_df = flow_df.sort_values("日期")
+        recent5 = pd.to_numeric(flow_df["主力净流入-净额"].tail(5), errors="coerce").dropna()
+        if len(recent5) > 0:
+            data["main_flow_5d"] = float(recent5.mean())
+            data["main_flow_trend"] = "净流入" if data["main_flow_5d"] > 0 else "净流出"
+            data["main_flow_date"] = flow_df["日期"].iloc[-1].strftime("%Y-%m-%d")
+
+    # 涨跌停家数/涨跌比
+    spot_df = _try("全市场行情", lambda: ak.stock_zh_a_spot_em())
+    if spot_df is not None:
+        chg = pd.to_numeric(spot_df["涨跌幅"], errors="coerce").dropna()
+        if len(chg) > 0:
+            limit_up = int((chg >= 9.9).sum())
+            limit_down = int((chg <= -9.9).sum())
+            up_count = int((chg > 0).sum())
+            down_count = int((chg < 0).sum())
+            data["limit_up_down"] = f"涨停{limit_up}/跌停{limit_down}"
+            data["up_down_count"] = f"上涨{up_count}/下跌{down_count}"
+            data["breadth"] = "普涨" if up_count > down_count * 2 else ("普跌" if down_count > up_count * 2 else "分化")
+            data["breadth_date"] = datetime.now().strftime("%Y-%m-%d")
 
     # 房价（百城）
     house_df = _try("百城房价", lambda: ak.macro_china_real_estate())
@@ -526,9 +563,15 @@ indicators = [
      "key": "market_volume", "fmt": lambda v: f"{v:.0f} 亿" if not np.isnan(v) else "—",
      "diag_type": "custom", "fn": lambda v, d: d.get("market_volume_trend", "—")},
 
-    {"维度": "情绪", "核心指标": "投资者情绪指数", "数据源": "互联网/券商",
-     "积极区间": "乐观 (需警惕过热)", "消极区间": "悲观 (可能是机会)", "信号解读": "如股吧热度、开户数等，极端悲观往往是左侧买点。",
-     "key": None, "fmt": lambda v: "—", "diag_type": "none"},
+    {"维度": "情绪", "核心指标": "主力资金净流入 (5日均值)", "数据源": "东方财富",
+     "积极区间": "持续净流入", "消极区间": "持续净流出", "信号解读": "主力大单动向，正值为市场看好，负值为主力出逃。",
+     "key": "main_flow_5d", "fmt": lambda v: f"{v/1e8:.2f} 亿" if not np.isnan(v) else "—",
+     "diag_type": "custom", "fn": lambda v, d: d.get("main_flow_trend", "—")},
+
+    {"维度": "情绪", "核心指标": "涨跌停家数 (市场广度)", "数据源": "东方财富",
+     "积极区间": "涨停>跌停2倍", "消极区间": "跌停>涨停2倍", "信号解读": "涨停家数远超跌停=情绪亢奋，反之=恐慌蔓延。",
+     "key": "limit_up_down", "fmt": lambda v: v if v else "—",
+     "diag_type": "custom", "fn": lambda v, d: d.get("breadth", "—")},
 
     # 风险
     {"维度": "风险", "核心指标": "QVIX (50ETF期权波动率)", "数据源": "中证",
@@ -536,9 +579,10 @@ indicators = [
      "key": "qvix", "fmt": lambda v: f"{v:.2f}",
      "diag_type": "percentile", "pct_key": "qvix_pct", "hot_label": "飙升", "cold_label": "低位"},
 
-    {"维度": "风险", "核心指标": "信用利差", "数据源": "Wind/中债登",
-     "积极区间": "利差收窄", "消极区间": "利差走阔", "信号解读": "信用债利率减去国债利率。走阔代表企业违约风险上升。",
-     "key": None, "fmt": lambda v: "—", "diag_type": "none"},
+    {"维度": "风险", "核心指标": "融资融券维持担保比例", "数据源": "沪深交易所",
+     "积极区间": ">280% (安全)", "消极区间": "<200% (高风险)", "信号解读": "杠杆水平核心指标。越低代表杠杆越高，<130%有平仓风险。",
+     "key": "margin_ratio", "fmt": lambda v: f"{v:.2f}%" if not np.isnan(v) else "—",
+     "diag_type": "custom", "fn": lambda v, d: d.get("margin_ratio_trend", "—")},
 
     {"维度": "风险", "核心指标": "市场风格 (大小盘/成长价值)", "数据源": "交易所",
      "积极区间": "小盘/成长领涨", "消极区间": "大盘/价值领涨", "信号解读": "小盘/成长占优代表风险偏好提升，大盘/价值占优代表防御心态。",
@@ -570,11 +614,11 @@ display_df = pd.DataFrame(display_rows)
 
 # 高亮诊断列
 def _highlight_diag(val):
-    if val in ["偏热", "亢奋", "泡沫", "飙升", "贬值", "下行", "跌破均线", "收缩", "疲软", "下跌", "偏紧", "净流出"]:
+    if val in ["偏热", "亢奋", "泡沫", "飙升", "贬值", "下行", "跌破均线", "收缩", "疲软", "下跌", "偏紧", "净流出", "高风险", "普跌"]:
         return "background-color: #ffe6e6; color: #8B0000"
-    if val in ["偏冷", "低迷", "低估", "低位", "升值", "回升", "站上均线", "扩张", "活跃", "旺盛", "企稳回升", "宽松", "净流入"]:
+    if val in ["偏冷", "低迷", "低估", "低位", "升值", "回升", "站上均线", "扩张", "活跃", "旺盛", "企稳回升", "宽松", "净流入", "安全", "普涨"]:
         return "background-color: #e6ffe6; color: #006400"
-    if val in ["中性", "持平"]:
+    if val in ["中性", "持平", "正常", "分化"]:
         return "background-color: #fff9e6; color: #8B7500"
     return ""
 
