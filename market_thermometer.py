@@ -517,7 +517,10 @@ def _highlight_diag(val):
         return "background-color: #fff9e6; color: #8B7500"
     return ""
 
-styled = display_df.style.applymap(_highlight_diag, subset=["诊断"])
+try:
+    styled = display_df.style.map(_highlight_diag, subset=["诊断"])
+except AttributeError:
+    styled = display_df.style.applymap(_highlight_diag, subset=["诊断"])
 st.dataframe(styled, use_container_width=True, hide_index=True, height=600)
 st.caption("实时拉取的指标已自动诊断（颜色：红=偏热/风险，绿=偏冷/积极，黄=中性）；未实时拉取的指标当前值显示为 —，可作为人工参考。")
 
