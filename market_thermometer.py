@@ -244,6 +244,16 @@ def fetch_market_data():
             data["northboard_trend"] = "净流入" if recent20.sum() > 0 else "净流出"
         data["northboard_date"] = hsgt_df[date_col].iloc[-1].strftime("%Y-%m-%d")
 
+    # 两市成交额（国证A指，399317）
+    all_cni_df = _try("国证A指", lambda: ak.index_all_cni())
+    if all_cni_df is not None:
+        gz_a = all_cni_df[all_cni_df["指数简称"] == "国证A指"]
+        if len(gz_a) > 0:
+            amount = float(pd.to_numeric(gz_a["成交额"].iloc[0], errors="coerce"))
+            data["market_volume"] = amount
+            data["market_volume_trend"] = "放量" if amount > 10000 else "缩量"
+            data["market_volume_date"] = datetime.now().strftime("%Y-%m-%d")
+
     # 房价（百城）
     house_df = _try("百城房价", lambda: ak.macro_china_real_estate())
     if house_df is not None:
@@ -470,9 +480,10 @@ indicators = [
      "key": "northbound_20d_net", "fmt": lambda v: f"{v/1e8:.2f} 亿",
      "diag_type": "custom", "fn": lambda v, d: d.get("northboard_trend", "—")},
 
-    {"维度": "情绪", "核心指标": "两市成交额", "数据源": "交易所",
+    {"维度": "情绪", "核心指标": "两市成交额", "数据源": "交易所(国证A指)",
      "积极区间": "放量 (>1万亿)", "消极区间": "缩量 (<6000亿)", "信号解读": "量在价先。无量上涨难持续，地量往往见地价。",
-     "key": None, "fmt": lambda v: "—", "diag_type": "none"},
+     "key": "market_volume", "fmt": lambda v: f"{v:.0f} 亿" if not np.isnan(v) else "—",
+     "diag_type": "custom", "fn": lambda v, d: d.get("market_volume_trend", "—")},
 
     {"维度": "情绪", "核心指标": "投资者情绪指数", "数据源": "互联网/券商",
      "积极区间": "乐观 (需警惕过热)", "消极区间": "悲观 (可能是机会)", "信号解读": "如股吧热度、开户数等，极端悲观往往是左侧买点。",
