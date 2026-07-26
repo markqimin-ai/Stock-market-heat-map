@@ -598,7 +598,7 @@ indicators = [
     {"维度": "资金", "核心指标": "Shibor (隔夜)", "数据源": "银行间市场",
      "积极区间": "利率处于低位", "消极区间": "利率飙升", "信号解读": "银行间资金成本，直接反映市场短期钱紧不紧。",
      "key": "shibor_overnight", "fmt": lambda v: f"{v:.4f}%",
-     "diag_type": "percentile", "pct_key": "shibor_pct", "hot_label": "偏紧", "cold_label": "宽松"},
+     "diag_type": "percentile", "pct_key": "shibor_pct", "hot_label": "偏紧", "cold_label": "宽松", "hot_is_high": False},
     # 注：Shibor 的 percentile 用 invert 语义不一致，这里直接用低=宽松，分位高=偏紧
 
     {"维度": "资金", "核心指标": "LPR (1年期)", "数据源": "中国人民银行",
@@ -609,7 +609,7 @@ indicators = [
     {"维度": "资金", "核心指标": "10Y国债收益率", "数据源": "中债登",
      "积极区间": "低位 / 下行", "消极区间": "飙升", "信号解读": "长期利率锚，反映资本环境宽松度。",
      "key": "yield_10y", "fmt": lambda v: f"{v:.2f}%",
-     "diag_type": "percentile", "pct_key": "yield_pct", "hot_label": "宽松", "cold_label": "偏紧"},
+     "diag_type": "percentile", "pct_key": "yield_pct", "hot_label": "宽松", "cold_label": "偏紧", "hot_is_high": True},
 
     # 走势
     {"维度": "走势", "核心指标": "上证指数 (vs 30日线)", "数据源": "上证所",
@@ -630,7 +630,7 @@ indicators = [
     {"维度": "走势", "核心指标": "融资融券余额", "数据源": "交易所",
      "积极区间": "持续增加", "消极区间": "持续减少", "信号解读": "杠杆资金的态度，反映市场风险偏好最高的资金动向。",
      "key": "margin", "fmt": lambda v: f"{v/1e8:.0f} 亿",
-     "diag_type": "percentile", "pct_key": "margin_pct", "hot_label": "亢奋", "cold_label": "低迷"},
+     "diag_type": "percentile", "pct_key": "margin_pct", "hot_label": "亢奋", "cold_label": "低迷", "hot_is_high": True},
 
     # 情绪
     {"维度": "情绪", "核心指标": "新基金发行份额", "数据源": "天天基金网",
@@ -662,7 +662,7 @@ indicators = [
     {"维度": "风险", "核心指标": "QVIX (50ETF期权波动率)", "数据源": "中证",
      "积极区间": "低位徘徊", "消极区间": "突然飙升", "信号解读": "中国版恐慌指数。飙升代表市场极度恐慌，避险情绪高涨。",
      "key": "qvix", "fmt": lambda v: f"{v:.2f}",
-     "diag_type": "percentile", "pct_key": "qvix_pct", "hot_label": "飙升", "cold_label": "低位"},
+     "diag_type": "percentile", "pct_key": "qvix_pct", "hot_label": "飙升", "cold_label": "低位", "hot_is_high": False},
 
     {"维度": "风险", "核心指标": "融资融券维持担保比例", "数据源": "沪深交易所",
      "积极区间": ">280% (安全)", "消极区间": "<200% (高风险)", "信号解读": "杠杆水平核心指标。越低代表杠杆越高，<130%有平仓风险。",
@@ -709,17 +709,14 @@ def _ind_to_score(spec, data_dict):
         pct = data_dict.get(spec["pct_key"], float("nan"))
         if pct is None or np.isnan(pct):
             return None
-        hot_label = spec["hot_label"]
-        if hot_label in ["偏紧", "飙升", "泡沫", "亢奋"]:
-            return float(pct)
-        else:
-            return float(100 - pct)
+        hot_is_high = spec.get("hot_is_high", True)
+        return float(pct) if hot_is_high else float(100 - pct)
     elif dtype == "custom":
         diag = spec["fn"](val, data_dict)
-        hot_words = ["扩张", "活跃", "旺盛", "企稳回升", "宽松", "站上均线", "亢奋", "泡沫",
-                     "偏暖", "净流入", "放量", "普涨", "飙升", "贬值", "高风险", "成长占优", "小盘占优"]
-        cold_words = ["收缩", "疲软", "下跌", "下行", "偏紧", "跌破均线", "低迷", "低估",
-                      "偏冷", "净流出", "缩量", "普跌", "低位", "升值", "安全", "价值占优", "大盘占优"]
+        hot_words = ["扩张", "活跃", "旺盛", "企稳回升", "宽松", "下调", "站上均线", "亢奋", "泡沫",
+                     "偏暖", "净流入", "放量", "普涨", "高风险", "成长占优", "小盘占优", "升值"]
+        cold_words = ["收缩", "疲软", "下跌", "下行", "偏紧", "上调", "跌破均线", "低迷", "低估",
+                      "偏冷", "净流出", "缩量", "普跌", "低位", "贬值", "安全", "价值占优", "大盘占优"]
         if diag in hot_words:
             return 80
         elif diag in cold_words:
