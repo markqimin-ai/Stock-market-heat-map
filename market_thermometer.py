@@ -146,13 +146,20 @@ def fetch_market_data():
         col = _pick_col(sf_df, ["社会融资规模增量"])
         date_col = _pick_col(sf_df, ["月份", "date", "日期"])
         sf_df = sf_df.sort_values(date_col)
-        series = pd.to_numeric(sf_df[col], errors="coerce")
-        data["social_finance"] = float(series.iloc[-1])
-        # 趋势：近6个月是否企稳回升（用近3月均值 vs 上3月均值）
-        recent3 = series.tail(3).mean()
-        prev3 = series.tail(6).head(3).mean()
-        data["social_finance_trend"] = "回升" if recent3 > prev3 else "下行"
-        data["social_finance_date"] = str(sf_df[date_col].iloc[-1])
+        series = pd.to_numeric(sf_df[col], errors="coerce").dropna()
+        if len(series) > 0:
+            data["social_finance"] = float(series.iloc[-1])
+            recent3 = series.tail(3).mean()
+            prev3 = series.tail(6).head(3).mean() if len(series) >= 6 else float("nan")
+            if not np.isnan(prev3):
+                data["social_finance_trend"] = "回升" if recent3 > prev3 else "下行"
+            else:
+                data["social_finance_trend"] = "—"
+            data["social_finance_date"] = str(sf_df[date_col].iloc[-1])
+        else:
+            data["social_finance"] = float("nan")
+            data["social_finance_trend"] = "—"
+            data["social_finance_date"] = str(sf_df[date_col].iloc[-1])
 
     # Shibor 隔夜
     shibor_df = _try("Shibor", lambda: ak.rate_interbank(
@@ -202,16 +209,17 @@ def fetch_market_data():
 
     ip_df = _try("工业增加值", lambda: ak.macro_china_industrial_production_yoy())
     if ip_df is not None:
-        # 今值可能是字符串百分数，提取数值
         col = _pick_col(ip_df, ["今值"])
         date_col = _pick_col(ip_df, ["日期", "date"])
         ip_df = ip_df.sort_values(date_col)
-        raw = ip_df[col].iloc[-1]
-        if isinstance(raw, str):
-            data["industrial_yoy"] = float(raw.replace("%", "").strip())
+        series = pd.to_numeric(ip_df[col], errors="coerce").dropna()
+        if len(series) > 0:
+            data["industrial_yoy"] = float(series.iloc[-1])
+            valid_idx = series.index[-1]
+            data["industrial_date"] = str(ip_df[date_col].iloc[valid_idx])
         else:
-            data["industrial_yoy"] = float(pd.to_numeric(pd.Series([raw]), errors="coerce").iloc[0])
-        data["industrial_date"] = str(ip_df[date_col].iloc[-1])
+            data["industrial_yoy"] = float("nan")
+            data["industrial_date"] = str(ip_df[date_col].iloc[-1])
 
     retail_df = _try("社消零售", lambda: ak.macro_china_consumer_goods_retail())
     if retail_df is not None:
