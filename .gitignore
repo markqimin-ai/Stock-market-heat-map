@@ -1,0 +1,21 @@
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 生成的报告（由 Actions 生成，不入库）
+reports/market_report_*.html
+reports/latest.html
+
+# 本地图片
+*.png
+!assets/*.png
+
+# Streamlit
+.streamlit/secrets.toml
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
