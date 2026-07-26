@@ -86,7 +86,7 @@ def fetch_market_data():
             return None
 
     # ===== 走势/价格维度 =====
-    # 全市场 PE (TTM 中位数) + 沪深300 收盘价
+    # 全市场 PE (TTM 中位数)
     pe_df = _try("全市场PE", lambda: ak.stock_a_ttm_lyr())
     if pe_df is not None:
         pe_df["date"] = pd.to_datetime(pe_df["date"])
@@ -95,12 +95,19 @@ def fetch_market_data():
         data["pe"] = float(latest["middlePETTM"])
         data["pe_pct"] = float(latest["quantileInRecent10YearsMiddlePeTtm"]) * 100
         data["pe_date"] = latest["date"].strftime("%Y-%m-%d")
-        # 用 close 作为上证替代（全市场收盘价）
-        data["index_close"] = float(latest["close"])
-        close_series = pd.to_numeric(pe_df["close"], errors="coerce")
-        ma30 = close_series.tail(30).mean()
-        data["index_ma30"] = float(ma30)
-        data["index_above_ma30"] = data["index_close"] > ma30
+
+    # 上证指数（真实数据）
+    sh_df = _try("上证指数", lambda: ak.stock_zh_index_daily(symbol="sh000001"))
+    if sh_df is not None:
+        sh_df["date"] = pd.to_datetime(sh_df["date"])
+        sh_df = sh_df.sort_values("date")
+        close_series = pd.to_numeric(sh_df["close"], errors="coerce").dropna()
+        if len(close_series) > 0:
+            data["index_close"] = float(close_series.iloc[-1])
+            ma30 = close_series.tail(30).mean()
+            data["index_ma30"] = float(ma30)
+            data["index_above_ma30"] = data["index_close"] > ma30
+            data["index_date"] = sh_df["date"].iloc[-1].strftime("%Y-%m-%d")
 
     # 融资融券余额
     margin_df = _try("融资融券", lambda: ak.macro_china_market_margin_sh())
@@ -483,7 +490,7 @@ indicators = [
      "diag_type": "percentile", "pct_key": "yield_pct", "hot_label": "宽松", "cold_label": "偏紧"},
 
     # 走势
-    {"维度": "走势", "核心指标": "上证指数 (vs 30日线)", "数据源": "全市场收盘价替代",
+    {"维度": "走势", "核心指标": "上证指数 (vs 30日线)", "数据源": "上证所",
      "积极区间": "站上均线", "消极区间": "跌破均线", "信号解读": "中短期趋势生命线，线上持股，线下持币。",
      "key": "index_close", "fmt": lambda v: f"{v:.2f}",
      "diag_type": "custom", "fn": lambda v, d: "站上均线" if d.get("index_above_ma30") else "跌破均线"},
