@@ -304,23 +304,21 @@ def fetch_market_data():
         except Exception as e:
             data["errors"].append(f"主力资金流向(解析): {e}")
 
-    # 主力资金备选：大单资金流汇总
+    # 主力资金备选：行业资金流汇总（加总所有行业净额≈全市场主力净流入）
     if not main_flow_ok:
-        big_deal_df = _try("大单资金流", lambda: ak.stock_fund_flow_big_deal())
-        if big_deal_df is not None:
+        ind_flow_df = _try("行业资金流汇总", lambda: ak.stock_fund_flow_industry(symbol="即时"))
+        if ind_flow_df is not None:
             try:
-                date_col = _pick_col(big_deal_df, ["日期", "date"])
-                net_col = _pick_col(big_deal_df, ["净流入", "净额", "net", "net_inflow"])
-                big_deal_df[date_col] = pd.to_datetime(big_deal_df[date_col])
-                big_deal_df = big_deal_df.sort_values(date_col)
-                recent5 = pd.to_numeric(big_deal_df[net_col].tail(5), errors="coerce").dropna()
-                if len(recent5) > 0:
-                    data["main_flow_5d"] = float(recent5.mean())
-                    data["main_flow_trend"] = "净流入" if data["main_flow_5d"] > 0 else "净流出"
-                    data["main_flow_date"] = big_deal_df[date_col].iloc[-1].strftime("%Y-%m-%d")
+                net_col = _pick_col(ind_flow_df, ["净额", "净流入", "net"])
+                net_values = pd.to_numeric(ind_flow_df[net_col], errors="coerce").dropna()
+                if len(net_values) > 0:
+                    total_net = net_values.sum() * 1e8
+                    data["main_flow_5d"] = total_net
+                    data["main_flow_trend"] = "净流入" if total_net > 0 else "净流出"
+                    data["main_flow_date"] = datetime.now().strftime("%Y-%m-%d")
                     main_flow_ok = True
             except Exception as e:
-                data["errors"].append(f"大单资金流(解析): {e}")
+                data["errors"].append(f"行业资金流汇总(解析): {e}")
 
     # 涨跌停家数/涨跌比 — 主方案：全市场行情快照
     spot_df = _try("全市场行情", lambda: ak.stock_zh_a_spot_em())
@@ -342,7 +340,29 @@ def fetch_market_data():
         except Exception as e:
             data["errors"].append(f"全市场行情(解析): {e}")
 
-    # 涨跌停备选方案：涨停池 + 跌停池接口（数据量小，更稳定）
+    # 涨跌停备选方案一：市场活跃度（乐股网，数据量小，稳定）
+    if not limit_ok:
+        activity_df = _try("市场活跃度", lambda: ak.stock_market_activity_legu())
+        if activity_df is not None:
+            try:
+                activity_dict = dict(zip(activity_df["item"], activity_df["value"]))
+                limit_up = int(activity_dict.get("涨停", 0))
+                limit_down = int(activity_dict.get("跌停", 0))
+                up_count = int(activity_dict.get("上涨", 0))
+                down_count = int(activity_dict.get("下跌", 0))
+                stat_date = activity_dict.get("统计日期", datetime.now().strftime("%Y-%m-%d"))
+                if isinstance(stat_date, str):
+                    stat_date = stat_date.split(" ")[0]
+                if limit_up > 0 or limit_down > 0 or up_count > 0 or down_count > 0:
+                    data["limit_up_down"] = f"涨停{limit_up}/跌停{limit_down}"
+                    data["up_down_count"] = f"上涨{up_count}/下跌{down_count}"
+                    data["breadth"] = "普涨" if up_count > down_count * 2 else ("普跌" if down_count > up_count * 2 else "分化")
+                    data["breadth_date"] = stat_date
+                    limit_ok = True
+            except Exception as e:
+                data["errors"].append(f"市场活跃度(解析): {e}")
+
+    # 涨跌停备选方案二：涨停池 + 跌停池接口
     if not limit_ok:
         today = datetime.now().strftime("%Y%m%d")
         yesterday = (datetime.now() - pd.Timedelta(days=1)).strftime("%Y%m%d")
@@ -362,7 +382,7 @@ def fetch_market_data():
                 if limit_up > 0 or limit_down > 0:
                     break
             except Exception as e:
-                data["errors"].append(f"涨跌停备选({date_str}): {e}")
+                data["errors"].append(f"涨跌停备选二({date_str}): {e}")
                 continue
 
         if limit_up > 0 or limit_down > 0:
