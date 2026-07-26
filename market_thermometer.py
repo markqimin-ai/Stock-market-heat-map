@@ -255,6 +255,18 @@ def fetch_market_data():
             data["market_volume_trend"] = "放量" if amount > 10000 else "缩量"
             data["market_volume_date"] = datetime.now().strftime("%Y-%m-%d")
 
+    # 新基金发行份额
+    fund_df = _try("新基金发行", lambda: ak.fund_new_found_em())
+    if fund_df is not None:
+        fund_df["成立日期"] = pd.to_datetime(fund_df["成立日期"], errors="coerce")
+        fund_df = fund_df.dropna(subset=["成立日期"])
+        fund_df["月份"] = fund_df["成立日期"].dt.to_period("M")
+        monthly = fund_df.groupby("月份")["募集份额"].sum().sort_index()
+        if len(monthly) > 0:
+            data["new_fund_shares"] = float(monthly.iloc[-1])
+            data["new_fund_trend"] = "偏暖" if monthly.iloc[-1] > 1000 else "偏冷"
+            data["new_fund_date"] = str(monthly.index[-1])
+
     # 房价（百城）
     house_df = _try("百城房价", lambda: ak.macro_china_real_estate())
     if house_df is not None:
@@ -293,6 +305,26 @@ def fetch_market_data():
             data["fx_20d_chg"] = float(chg)
             data["fx_trend"] = "贬值" if chg > 0 else "升值"
         data["fx_date"] = fx_df[date_col].iloc[-1].strftime("%Y-%m-%d")
+
+    # ===== 市场风格 =====
+    # 沪深300 vs 中证1000 (大小盘)
+    hs300_df = _try("沪深300", lambda: ak.stock_zh_index_daily(symbol="sh000300"))
+    zz1000_df = _try("中证1000", lambda: ak.stock_zh_index_daily(symbol="sh000852"))
+    cyb_df = _try("创业板指", lambda: ak.stock_zh_index_daily(symbol="sz399006"))
+    
+    if hs300_df is not None and zz1000_df is not None:
+        hs300_last = float(hs300_df["close"].iloc[-1])
+        zz1000_last = float(zz1000_df["close"].iloc[-1])
+        data["style_large_small"] = "大盘占优" if hs300_last > zz1000_last else "小盘占优"
+        data["style_large_small_diff"] = hs300_last - zz1000_last
+    
+    if hs300_df is not None and cyb_df is not None:
+        cyb_last = float(cyb_df["close"].iloc[-1])
+        data["style_growth_value"] = "成长占优" if cyb_last > hs300_last else "价值占优"
+        data["style_growth_value_diff"] = cyb_last - hs300_last
+    
+    if hs300_df is not None:
+        data["style_date"] = str(hs300_df["date"].iloc[-1])
 
     return data
 
@@ -472,9 +504,10 @@ indicators = [
      "diag_type": "percentile", "pct_key": "margin_pct", "hot_label": "亢奋", "cold_label": "低迷"},
 
     # 情绪
-    {"维度": "情绪", "核心指标": "新基金发行份额", "数据源": "基金业协会",
-     "积极区间": "显著回暖 / 爆款频出", "消极区间": "冰点期 / 发行失败", "信号解读": "散户入场意愿的直接体现，过热通常是顶部信号。",
-     "key": None, "fmt": lambda v: "—", "diag_type": "none"},
+    {"维度": "情绪", "核心指标": "新基金发行份额", "数据源": "天天基金网",
+     "积极区间": "偏暖 (>1000亿份)", "消极区间": "偏冷 (<500亿份)", "信号解读": "散户入场意愿的直接体现，过热通常是顶部信号。",
+     "key": "new_fund_shares", "fmt": lambda v: f"{v:.0f} 亿份" if not np.isnan(v) else "—",
+     "diag_type": "custom", "fn": lambda v, d: d.get("new_fund_trend", "—")},
 
     {"维度": "情绪", "核心指标": "北向资金 (20日净流入)", "数据源": "东方财富",
      "积极区间": "连续净流入", "消极区间": "连续净流出", "信号解读": "聪明钱动向，对核心资产影响大。",
@@ -500,9 +533,10 @@ indicators = [
      "积极区间": "利差收窄", "消极区间": "利差走阔", "信号解读": "信用债利率减去国债利率。走阔代表企业违约风险上升。",
      "key": None, "fmt": lambda v: "—", "diag_type": "none"},
 
-    {"维度": "风险", "核心指标": "市场风格 (大小盘/成长价值)", "数据源": "行业指数",
-     "积极区间": "进攻型板块领涨", "消极区间": "防御/红利板块领涨", "信号解读": "只有防御板块涨时，说明市场缺乏信心。",
-     "key": None, "fmt": lambda v: "—", "diag_type": "none"},
+    {"维度": "风险", "核心指标": "市场风格 (大小盘/成长价值)", "数据源": "交易所",
+     "积极区间": "小盘/成长领涨", "消极区间": "大盘/价值领涨", "信号解读": "小盘/成长占优代表风险偏好提升，大盘/价值占优代表防御心态。",
+     "key": "style_large_small", "fmt": lambda v: v if v else "—",
+     "diag_type": "custom", "fn": lambda v, d: d.get("style_growth_value", "—")},
 
     {"维度": "风险", "核心指标": "人民币汇率 (USD/CNY)", "数据源": "外汇交易中心",
      "积极区间": "稳中有升 / 双向波动", "消极区间": "快速贬值", "信号解读": "汇率贬值往往伴随资金外流压力，压制A股估值。",
