@@ -826,6 +826,165 @@ if dim_avg:
     with st.expander("📋 各指标详细热度分", expanded=False):
         st.dataframe(pd.DataFrame(dim_details), use_container_width=True, hide_index=True)
 
+# ==================== 近6个月核心热度走势 ====================
+st.divider()
+st.subheader("📈 近6个月核心热度走势")
+st.caption("基于PE、融资余额、国债收益率三个核心指标，回溯计算近6个月每个交易日的市场热度分。绿色区域=偏冷(<30)，黄色=中性(30-70)，红色=偏热(>70)。")
+
+# 获取交易日列表（以上证指数为锚）
+sh_hist = _try("上证历史", lambda: ak.stock_zh_index_daily(symbol="sh000001"))
+if sh_hist is not None:
+    sh_hist["date"] = pd.to_datetime(sh_hist["date"])
+    sh_hist = sh_hist.sort_values("date")
+    cutoff_6m = sh_hist["date"].max() - pd.Timedelta(days=180)
+    trade_dates = sh_hist[sh_hist["date"] >= cutoff_6m][["date"]].copy()
+
+    # 获取完整历史序列（用于计算百分位窗口）
+    pe_full = _try("PE历史", lambda: ak.stock_a_ttm_lyr())
+    margin_full = _try("融资历史", lambda: ak.macro_china_market_margin_sh())
+    bond_full = _try("国债历史", lambda: ak.bond_zh_us_rate())
+
+    if pe_full is not None and margin_full is not None and bond_full is not None:
+        # 标准化PE数据
+        pe_full["date"] = pd.to_datetime(pe_full["date"])
+        pe_full = pe_full.sort_values("date")[["date", "middlePETTM"]].copy()
+        pe_full["middlePETTM"] = pd.to_numeric(pe_full["middlePETTM"], errors="coerce")
+
+        # 标准化融资余额数据
+        margin_full["date"] = pd.to_datetime(margin_full["日期"])
+        margin_full = margin_full.sort_values("date")[["date", "融资余额"]].copy()
+        margin_full["融资余额"] = pd.to_numeric(margin_full["融资余额"], errors="coerce")
+
+        # 标准化国债数据
+        bond_full["date"] = pd.to_datetime(bond_full["日期"])
+        bond_full = bond_full.sort_values("date")[["date", "中国国债收益率10年"]].copy()
+        bond_full["中国国债收益率10年"] = pd.to_numeric(bond_full["中国国债收益率10年"], errors="coerce")
+
+        # 用 merge_asof 将三个序列对齐到交易日
+        merged = pd.merge_asof(trade_dates, pe_full, on="date", direction="backward")
+        merged = pd.merge_asof(merged, margin_full, on="date", direction="backward")
+        merged = pd.merge_asof(merged, bond_full, on="date", direction="backward")
+        merged = merged.dropna()
+
+        # 计算每日核心热度
+        heat_history = []
+        for _, row in merged.iterrows():
+            date = row["date"]
+
+            # PE 10年百分位
+            pe_window = pe_full[
+                (pe_full["date"] >= date - pd.Timedelta(days=365 * 10)) &
+                (pe_full["date"] <= date)
+            ]["middlePETTM"].dropna()
+            pe_pct = (pe_window <= row["middlePETTM"]).mean() * 100 if len(pe_window) > 0 else float("nan")
+
+            # 融资余额 5年百分位
+            margin_window = margin_full[
+                (margin_full["date"] >= date - pd.Timedelta(days=365 * 5)) &
+                (margin_full["date"] <= date)
+            ]["融资余额"].dropna()
+            margin_pct = (margin_window <= row["融资余额"]).mean() * 100 if len(margin_window) > 0 else float("nan")
+
+            # 国债 10年百分位(invert=True)
+            bond_window = bond_full[
+                (bond_full["date"] >= date - pd.Timedelta(days=365 * 10)) &
+                (bond_full["date"] <= date)
+            ]["中国国债收益率10年"].dropna()
+            yield_pct_raw = (bond_window <= row["中国国债收益率10年"]).mean() * 100 if len(bond_window) > 0 else float("nan")
+            yield_pct = 100 - yield_pct_raw if not np.isnan(yield_pct_raw) else float("nan")
+
+            if not np.isnan(pe_pct) and not np.isnan(margin_pct) and not np.isnan(yield_pct):
+                heat = pe_pct * 0.4 + margin_pct * 0.3 + yield_pct * 0.3
+                heat_history.append({
+                    "date": date,
+                    "heat": heat,
+                    "PE": pe_pct,
+                    "融资余额": margin_pct,
+                    "国债": yield_pct,
+                })
+
+        heat_df = pd.DataFrame(heat_history)
+
+        if len(heat_df) > 10:
+            fig_trend = go.Figure()
+
+            # 主热度线
+            fig_trend.add_trace(go.Scatter(
+                x=heat_df["date"], y=heat_df["heat"],
+                mode="lines", name="核心热度",
+                line=dict(color="#1f77b4", width=2.5),
+                fill="tozeroy",
+                fillcolor="rgba(31,119,180,0.08)",
+                hovertemplate="%{x|%Y-%m-%d}<br>热度: %{y:.1f}<extra></extra>",
+            ))
+
+            # 参考线
+            fig_trend.add_hline(y=70, line_dash="dash", line_color="#d62728",
+                                annotation_text="过热线 70", annotation_position="right",
+                                annotation_font_color="#d62728")
+            fig_trend.add_hline(y=50, line_dash="dot", line_color="gray",
+                                annotation_text="中性 50", annotation_position="right")
+            fig_trend.add_hline(y=30, line_dash="dash", line_color="#2ca02c",
+                                annotation_text="过冷线 30", annotation_position="right",
+                                annotation_font_color="#2ca02c")
+
+            # 颜色分区背景
+            fig_trend.add_hrect(y0=70, y1=100, line_width=0, fillcolor="#d62728", opacity=0.04)
+            fig_trend.add_hrect(y0=0, y1=30, line_width=0, fillcolor="#2ca02c", opacity=0.04)
+
+            fig_trend.update_layout(
+                xaxis_title="日期",
+                yaxis_title="热度分",
+                yaxis=dict(range=[0, 100]),
+                height=420,
+                margin=dict(l=50, r=80, t=30, b=30),
+                hovermode="x unified",
+                showlegend=False,
+                plot_bgcolor="white",
+            )
+
+            st.plotly_chart(fig_trend, use_container_width=True)
+
+            # 统计面板
+            latest_h = heat_df["heat"].iloc[-1]
+            avg_h = heat_df["heat"].mean()
+            min_h = heat_df["heat"].min()
+            max_h = heat_df["heat"].max()
+            min_date = heat_df.loc[heat_df["heat"].idxmin(), "date"].strftime("%m-%d")
+            max_date = heat_df.loc[heat_df["heat"].idxmax(), "date"].strftime("%m-%d")
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("当前热度", f"{latest_h:.1f}")
+            c2.metric("6月均值", f"{avg_h:.1f}")
+            c3.metric("区间最低", f"{min_h:.1f}", f"{min_date}", delta_color="off")
+            c4.metric("区间最高", f"{max_h:.1f}", f"{max_date}", delta_color="off")
+
+            # 趋势判断
+            if len(heat_df) >= 40:
+                recent_20 = heat_df["heat"].tail(20).mean()
+                prev_20 = heat_df["heat"].iloc[-40:-20].mean()
+                change = recent_20 - prev_20
+                if change > 5:
+                    st.success(f"📈 近20日热度均值 {recent_20:.1f}，较前20日上升 {change:.1f} 分，市场持续升温")
+                elif change < -5:
+                    st.warning(f"📉 近20日热度均值 {recent_20:.1f}，较前20日下降 {-change:.1f} 分，市场明显降温")
+                else:
+                    st.info(f"➡️ 近20日热度均值 {recent_20:.1f}，与前20日基本持平（变化 {change:+.1f} 分）")
+
+            # 可以展开查看明细
+            with st.expander("📋 历史热度明细", expanded=False):
+                detail_df = heat_df.copy()
+                detail_df["date"] = detail_df["date"].dt.strftime("%Y-%m-%d")
+                detail_df.columns = ["日期", "核心热度", "PE百分位", "融资余额百分位", "国债宽松度"]
+                detail_df = detail_df.sort_values("日期", ascending=False)
+                st.dataframe(detail_df, use_container_width=True, hide_index=True)
+        else:
+            st.warning("历史数据不足，无法绘制6个月走势图。")
+    else:
+        st.warning("部分历史数据获取失败，无法绘制走势图。")
+else:
+    st.warning("上证指数历史数据获取失败。")
+
 # ==================== 完整指标体系 ====================
 display_rows = []
 for ind in indicators:
