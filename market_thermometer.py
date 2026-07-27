@@ -832,7 +832,15 @@ st.subheader("📈 近6个月核心热度走势")
 st.caption("基于PE、融资余额、国债收益率三个核心指标，回溯计算近6个月每个交易日的市场热度分。绿色区域=偏冷(<30)，黄色=中性(30-70)，红色=偏热(>70)。")
 
 # 获取交易日列表（以上证指数为锚）
-sh_hist = _try("上证历史", lambda: ak.stock_zh_index_daily(symbol="sh000001"))
+def _hist_try(name, fn):
+    """走势图专用的轻量错误捕获"""
+    try:
+        return fn()
+    except Exception as e:
+        st.caption(f"⚠️ {name}: {e}")
+        return None
+
+sh_hist = _hist_try("上证历史", lambda: ak.stock_zh_index_daily(symbol="sh000001"))
 if sh_hist is not None:
     sh_hist["date"] = pd.to_datetime(sh_hist["date"])
     sh_hist = sh_hist.sort_values("date")
@@ -840,9 +848,9 @@ if sh_hist is not None:
     trade_dates = sh_hist[sh_hist["date"] >= cutoff_6m][["date"]].copy()
 
     # 获取完整历史序列（用于计算百分位窗口）
-    pe_full = _try("PE历史", lambda: ak.stock_a_ttm_lyr())
-    margin_full = _try("融资历史", lambda: ak.macro_china_market_margin_sh())
-    bond_full = _try("国债历史", lambda: ak.bond_zh_us_rate())
+    pe_full = _hist_try("PE历史", lambda: ak.stock_a_ttm_lyr())
+    margin_full = _hist_try("融资历史", lambda: ak.macro_china_market_margin_sh())
+    bond_full = _hist_try("国债历史", lambda: ak.bond_zh_us_rate())
 
     if pe_full is not None and margin_full is not None and bond_full is not None:
         # 标准化PE数据
