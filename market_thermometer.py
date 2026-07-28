@@ -264,15 +264,24 @@ def fetch_market_data():
             data["northboard_trend"] = "净流入" if recent20.sum() > 0 else "净流出"
         data["northboard_date"] = hsgt_df[date_col].iloc[-1].strftime("%Y-%m-%d")
 
-    # 两市成交额（国证A指，399317）
-    all_cni_df = _try("国证A指", lambda: ak.index_all_cni())
-    if all_cni_df is not None:
-        gz_a = all_cni_df[all_cni_df["指数简称"] == "国证A指"]
-        if len(gz_a) > 0:
-            amount = float(pd.to_numeric(gz_a["成交额"].iloc[0], errors="coerce"))
-            data["market_volume"] = amount
-            data["market_volume_trend"] = "放量" if amount > 20000 else ("缩量" if amount < 8000 else "平稳")
-            data["market_volume_date"] = datetime.now().strftime("%Y-%m-%d")
+    # 两市成交额（国证A指，399317）— 直接请求国证指数API，绕过akshare列名bug
+    def _fetch_cni_volume():
+        import requests
+        url = "https://www.cnindex.com.cn/index/indexList"
+        params = {"channelCode": "-1", "rows": "2000", "pageNum": "1"}
+        r = requests.get(url, params=params, timeout=10)
+        data_json = r.json()
+        rows = data_json["data"]["rows"]
+        for row in rows:
+            if row.get("indexname") == "国证A指":
+                return float(row["amount"]) / 1e8  # 转为亿元
+        return None
+
+    cni_amount = _try("国证A指", lambda: _fetch_cni_volume())
+    if cni_amount is not None:
+        data["market_volume"] = cni_amount
+        data["market_volume_trend"] = "放量" if cni_amount > 20000 else ("缩量" if cni_amount < 8000 else "平稳")
+        data["market_volume_date"] = datetime.now().strftime("%Y-%m-%d")
 
     # 新基金发行份额
     fund_df = _try("新基金发行", lambda: ak.fund_new_found_em())
