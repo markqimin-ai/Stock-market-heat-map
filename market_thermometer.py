@@ -1046,8 +1046,8 @@ def _diag_color(val):
     return "", ""
 
 cols = list(display_df.columns)
-col1_w = 70   # 第一列宽度
-col2_w = 200  # 第二列宽度
+col1_w = 60   # 第一列宽度
+col2_w = 150  # 第二列宽度
 
 html_parts = [
     "<style>",
@@ -1059,8 +1059,6 @@ html_parts = [
     ".tbl-wrap .col2{position:sticky;left:" + str(col1_w) + "px;z-index:4;min-width:" + str(col2_w) + "px;max-width:" + str(col2_w) + "px;}",
     ".tbl-wrap thead .col1{z-index:6;}",
     ".tbl-wrap thead .col2{z-index:6;}",
-    ".tbl-wrap tbody .col1{background:#eef1f5;font-weight:bold;}",
-    ".tbl-wrap tbody .col2{background:#eef1f5;font-weight:bold;}",
     "</style>",
     "<div class='tbl-wrap'>",
     "<table>",
