@@ -1051,19 +1051,22 @@ col2_w = 150  # 第二列宽度
 
 html_parts = [
     "<style>",
-    ".tbl-wrap{max-height:600px;overflow:auto;border:1px solid #ddd;}",
+    "body{margin:0;padding:0;}",
+    ".tbl-wrap{max-height:580px;overflow:auto;border:1px solid #ddd;position:relative;}",
     ".tbl-wrap table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px;}",
-    ".tbl-wrap th,.tbl-wrap td{border:1px solid #ddd;border-top:none;border-left:none;padding:6px 10px;white-space:nowrap;text-align:left;background:#fff;}",
-    ".tbl-wrap thead th{background:#2c3e50;color:#fff;font-weight:bold;position:sticky;top:0;z-index:5;}",
+    ".tbl-wrap th,.tbl-wrap td{border:1px solid #ddd;border-top:none;border-left:none;padding:6px 10px;white-space:nowrap;text-align:left;background:#fff;overflow:hidden;}",
+    ".tbl-wrap thead th{background:#2c3e50;color:#fff;font-weight:bold;position:sticky;top:0;z-index:15;}",
     ".tbl-wrap thead th:first-child{border-left:none;}",
-    ".tbl-wrap .col1{position:sticky;left:0;z-index:4;min-width:" + str(col1_w) + "px;max-width:" + str(col1_w) + "px;",
-    "overflow:hidden;background:#fff !important;",
-    "box-shadow:2px 0 4px -2px rgba(0,0,0,0.15);}",
-    ".tbl-wrap .col2{position:sticky;left:" + str(col1_w) + "px;z-index:4;min-width:" + str(col2_w) + "px;max-width:" + str(col2_w) + "px;",
-    "overflow:hidden;background:#fff !important;",
-    "box-shadow:2px 0 4px -2px rgba(0,0,0,0.15);}",
-    ".tbl-wrap thead .col1{z-index:6;background:#2c3e50 !important;}",
-    ".tbl-wrap thead .col2{z-index:6;background:#2c3e50 !important;}",
+    ".tbl-wrap .col1{position:sticky;left:0;z-index:12;",
+    "min-width:" + str(col1_w) + "px;max-width:" + str(col1_w) + "px;width:" + str(col1_w) + "px;",
+    "overflow:hidden;background:#fff;",
+    "box-shadow:3px 0 6px -3px rgba(0,0,0,0.25);}",
+    ".tbl-wrap .col2{position:sticky;left:" + str(col1_w) + "px;z-index:11;",
+    "min-width:" + str(col2_w) + "px;max-width:" + str(col2_w) + "px;width:" + str(col2_w) + "px;",
+    "overflow:hidden;background:#fff;",
+    "box-shadow:3px 0 6px -3px rgba(0,0,0,0.25);}",
+    ".tbl-wrap thead .col1{z-index:25;background:#2c3e50;}",
+    ".tbl-wrap thead .col2{z-index:24;background:#2c3e50;}",
     "</style>",
     "<div class='tbl-wrap'>",
     "<table>",
@@ -1092,7 +1095,7 @@ for _, row in display_df.iterrows():
     html_parts.append("</tr>")
 
 html_parts.extend(["</tbody>", "</table>", "</div>"])
-st.markdown("".join(html_parts), unsafe_allow_html=True)
+st.components.v1.html("".join(html_parts), height=600, scrolling=True)
 st.caption("实时拉取的指标已自动诊断（颜色：红=偏热/风险，绿=偏冷/积极，黄=中性）；未实时拉取的指标当前值显示为 —，可作为人工参考。")
 
 # ---------------- 数据源告警 ----------------
