@@ -1046,7 +1046,7 @@ def _diag_color(val):
     return "", ""
 
 cols = list(display_df.columns)
-col1_w = 60   # 第一列宽度
+col1_w = 45   # 第一列宽度
 col2_w = 150  # 第二列宽度
 
 html_parts = [
