@@ -1034,7 +1034,55 @@ try:
     styled = display_df.style.map(_highlight_diag, subset=["诊断"])
 except AttributeError:
     styled = display_df.style.applymap(_highlight_diag, subset=["诊断"])
-st.dataframe(styled, use_container_width=True, hide_index=True, height=600)
+
+# 冻结前两列（维度、核心指标），通过自定义HTML表格实现
+def _diag_color(val):
+    if val in ["偏热", "亢奋", "泡沫", "飙升", "贬值", "下行", "跌破均线", "收缩", "疲软", "下跌", "偏紧", "净流出", "高风险", "普跌"]:
+        return "#ffe6e6", "#8B0000"
+    if val in ["偏冷", "低迷", "低估", "低位", "升值", "回升", "站上均线", "扩张", "活跃", "旺盛", "企稳回升", "宽松", "净流入", "安全", "普涨"]:
+        return "#e6ffe6", "#006400"
+    if val in ["中性", "持平", "正常", "分化"]:
+        return "#fff9e6", "#8B7500"
+    return "", ""
+
+cols = list(display_df.columns)
+html_parts = [
+    "<style>"
+    "table.frozen-cols {border-collapse: collapse; width: 100%; font-size: 13px;}"
+    "table.frozen-cols th, table.frozen-cols td {border: 1px solid #ddd; padding: 6px 8px; white-space: nowrap; text-align: left;}"
+    "table.frozen-cols thead th {background: #f0f2f6; position: sticky; top: 0; z-index: 2;}"
+    "table.frozen-cols th:nth-child(1), table.frozen-cols td:nth-child(1), "
+    "table.frozen-cols th:nth-child(2), table.frozen-cols td:nth-child(2) {"
+    "position: sticky; background: #f0f2f6; z-index: 3;}"
+    "table.frozen-cols td:nth-child(1), table.frozen-cols td:nth-child(2) {background: #fafafa;}"
+    "table.frozen-cols th:nth-child(1) {left: 0; min-width: 60px;}"
+    "table.frozen-cols th:nth-child(2) {left: 60px; min-width: 180px;}"
+    "table.frozen-cols td:nth-child(1) {left: 0; min-width: 60px;}"
+    "table.frozen-cols td:nth-child(2) {left: 60px; min-width: 180px;}"
+    ".table-scroll {max-height: 600px; overflow: auto;}"
+    "</style>",
+    "<div class='table-scroll'>",
+    "<table class='frozen-cols'>",
+    "<thead><tr>" + "".join(f"<th>{c}</th>" for c in cols) + "</tr></thead>",
+    "<tbody>",
+]
+
+for _, row in display_df.iterrows():
+    html_parts.append("<tr>")
+    for i, c in enumerate(cols):
+        val = row[c]
+        if c == "诊断":
+            bg, color = _diag_color(val)
+            style = f" style='background-color:{bg};color:{color};'" if bg else ""
+            html_parts.append(f"<td{style}>{val}</td>")
+        elif i < 2:
+            html_parts.append(f"<td><b>{val}</b></td>")
+        else:
+            html_parts.append(f"<td>{val}</td>")
+    html_parts.append("</tr>")
+
+html_parts.extend(["</tbody>", "</table>", "</div>"])
+st.markdown("".join(html_parts), unsafe_allow_html=True)
 st.caption("实时拉取的指标已自动诊断（颜色：红=偏热/风险，绿=偏冷/积极，黄=中性）；未实时拉取的指标当前值显示为 —，可作为人工参考。")
 
 # ---------------- 数据源告警 ----------------
