@@ -1046,37 +1046,44 @@ def _diag_color(val):
     return "", ""
 
 cols = list(display_df.columns)
+col1_w = 70   # 第一列宽度
+col2_w = 200  # 第二列宽度
+
 html_parts = [
-    "<style>"
-    "table.frozen-cols {border-collapse: collapse; width: 100%; font-size: 13px;}"
-    "table.frozen-cols th, table.frozen-cols td {border: 1px solid #ddd; padding: 6px 8px; white-space: nowrap; text-align: left;}"
-    "table.frozen-cols thead th {background: #f0f2f6; position: sticky; top: 0; z-index: 2;}"
-    "table.frozen-cols th:nth-child(1), table.frozen-cols td:nth-child(1), "
-    "table.frozen-cols th:nth-child(2), table.frozen-cols td:nth-child(2) {"
-    "position: sticky; background: #f0f2f6; z-index: 3;}"
-    "table.frozen-cols td:nth-child(1), table.frozen-cols td:nth-child(2) {background: #fafafa;}"
-    "table.frozen-cols th:nth-child(1) {left: 0; min-width: 60px;}"
-    "table.frozen-cols th:nth-child(2) {left: 60px; min-width: 180px;}"
-    "table.frozen-cols td:nth-child(1) {left: 0; min-width: 60px;}"
-    "table.frozen-cols td:nth-child(2) {left: 60px; min-width: 180px;}"
-    ".table-scroll {max-height: 600px; overflow: auto;}"
+    "<style>",
+    ".tbl-wrap{max-height:600px;overflow:auto;border:1px solid #ddd;}",
+    ".tbl-wrap table{border-collapse:collapse;width:100%;font-size:13px;}",
+    ".tbl-wrap th,.tbl-wrap td{border:1px solid #ddd;padding:6px 10px;white-space:nowrap;text-align:left;}",
+    ".tbl-wrap thead th{background:#2c3e50;color:#fff;font-weight:bold;position:sticky;top:0;z-index:5;}",
+    ".tbl-wrap .col1{position:sticky;left:0;z-index:4;min-width:" + str(col1_w) + "px;max-width:" + str(col1_w) + "px;}",
+    ".tbl-wrap .col2{position:sticky;left:" + str(col1_w) + "px;z-index:4;min-width:" + str(col2_w) + "px;max-width:" + str(col2_w) + "px;}",
+    ".tbl-wrap thead .col1{z-index:6;}",
+    ".tbl-wrap thead .col2{z-index:6;}",
+    ".tbl-wrap tbody .col1{background:#eef1f5;font-weight:bold;}",
+    ".tbl-wrap tbody .col2{background:#eef1f5;font-weight:bold;}",
     "</style>",
-    "<div class='table-scroll'>",
-    "<table class='frozen-cols'>",
-    "<thead><tr>" + "".join(f"<th>{c}</th>" for c in cols) + "</tr></thead>",
-    "<tbody>",
+    "<div class='tbl-wrap'>",
+    "<table>",
+    "<thead><tr>",
 ]
+
+for i, c in enumerate(cols):
+    cls = " class='col1'" if i == 0 else (" class='col2'" if i == 1 else "")
+    html_parts.append(f"<th{cls}>{c}</th>")
+
+html_parts.append("</tr></thead><tbody>")
 
 for _, row in display_df.iterrows():
     html_parts.append("<tr>")
     for i, c in enumerate(cols):
-        val = row[c]
-        if c == "诊断":
+        val = str(row[c])
+        if i < 2:
+            cls = " class='col1'" if i == 0 else " class='col2'"
+            html_parts.append(f"<td{cls}>{val}</td>")
+        elif c == "诊断":
             bg, color = _diag_color(val)
-            style = f" style='background-color:{bg};color:{color};'" if bg else ""
+            style = f" style='background-color:{bg};color:{color};font-weight:bold;'" if bg else ""
             html_parts.append(f"<td{style}>{val}</td>")
-        elif i < 2:
-            html_parts.append(f"<td><b>{val}</b></td>")
         else:
             html_parts.append(f"<td>{val}</td>")
     html_parts.append("</tr>")
