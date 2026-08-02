@@ -269,7 +269,8 @@ def fetch_market_data():
         import requests
         url = "https://www.cnindex.com.cn/index/indexList"
         params = {"channelCode": "-1", "rows": "2000", "pageNum": "1"}
-        r = requests.get(url, params=params, timeout=10)
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        r = requests.get(url, params=params, headers=headers, timeout=10)
         data_json = r.json()
         rows = data_json["data"]["rows"]
         for row in rows:
