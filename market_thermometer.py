@@ -902,8 +902,8 @@ if sh_hist is not None:
 
     # 获取完整历史序列（用于计算百分位窗口）
     pe_full = _hist_try("PE历史", lambda: ak.stock_a_ttm_lyr())
-    margin_full = _hist_try("融资历史", lambda: ak.macro_china_market_margin_sh())
-    bond_full = _hist_try("国债历史", lambda: ak.bond_zh_us_rate())
+    margin_full = _hist_try("融资历史", lambda: _ak_call("stock_margin_sse_js", "macro_china_market_margin_sh"))
+    bond_full = _hist_try("国债历史", lambda: _ak_call("bond_zh_us_yield_em", "bond_zh_us_rate"))
 
     if pe_full is not None and margin_full is not None and bond_full is not None:
         # 标准化PE数据
