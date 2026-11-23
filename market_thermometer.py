@@ -39,15 +39,23 @@ def _rank_score(series, current, invert=False, window_days=None, dates=None):
 
 
 def _fmt(v, fmt=".2f", unit=""):
-    return f"{v:{fmt}}{unit}" if not np.isnan(v) else "N/A"
+    try:
+        fv = float(v)
+    except (TypeError, ValueError):
+        return "N/A"
+    return f"{fv:{fmt}}{unit}" if not np.isnan(fv) else "N/A"
 
 
 def _diag(pct, hot_label="偏热", cold_label="偏冷", mid_label="中性"):
-    if np.isnan(pct):
+    try:
+        p = float(pct)
+    except (TypeError, ValueError):
         return "—"
-    if pct >= 70:
+    if np.isnan(p):
+        return "—"
+    if p >= 70:
         return hot_label
-    if pct < 30:
+    if p < 30:
         return cold_label
     return mid_label
 
@@ -522,15 +530,15 @@ st.subheader("📋 核心指标明细")
 detail_rows = [
     {"维度": "资产价格", "指标": "全市场PE(TTM)中位数", "当前值": _fmt(data.get("pe")),
      "历史分位": _fmt(data.get("pe_pct"), ".2f", "%"), "权重": "40%",
-     "加权贡献": _fmt(data.get("pe_pct", 0) * 0.4),
+     "加权贡献": _fmt(data.get("pe_pct", float("nan")) * 0.4),
      "诊断": _diag(data.get("pe_pct", float("nan")), "估值偏高", "估值偏低")},
     {"维度": "投资人情绪", "指标": "上证融资余额", "当前值": _fmt(data.get("margin") / 1e8 if data.get("margin") else float("nan"), ".0f", " 亿"),
      "历史分位": _fmt(data.get("margin_pct"), ".2f", "%"), "权重": "30%",
-     "加权贡献": _fmt(data.get("margin_pct", 0) * 0.3),
+     "加权贡献": _fmt(data.get("margin_pct", float("nan")) * 0.3),
      "诊断": _diag(data.get("margin_pct", float("nan")), "情绪亢奋", "情绪低迷")},
     {"维度": "资本环境", "指标": "10年期国债收益率", "当前值": _fmt(data.get("yield_10y"), ".2f", "%"),
      "历史分位": _fmt(data.get("yield_pct"), ".2f", "%"), "权重": "30%",
-     "加权贡献": _fmt(data.get("yield_pct", 0) * 0.3),
+     "加权贡献": _fmt(data.get("yield_pct", float("nan")) * 0.3),
      "诊断": _diag(data.get("yield_pct", float("nan")), "资金宽松", "资金偏紧")},
     {"维度": "合计", "指标": "—", "当前值": "—", "历史分位": "—", "权重": "100%",
      "加权贡献": f"{heat_score:.2f}", "诊断": _diag(heat_score, "偏热", "偏冷")},
