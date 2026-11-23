@@ -465,11 +465,11 @@ def fetch_market_data():
         date_col = _pick_col(qvix_df, ["date", "日期"])
         qvix_df[date_col] = pd.to_datetime(qvix_df[date_col])
         qvix_df = qvix_df.sort_values(date_col)
-        series = pd.to_numeric(qvix_df[col], errors="coerce")
+        series = pd.to_numeric(qvix_df[col], errors="coerce").dropna()
         data["qvix"] = float(series.iloc[-1])
         data["qvix_pct"] = _rank_score(series, data["qvix"], window_days=365*3,
-                                        dates=qvix_df[date_col])
-        data["qvix_date"] = qvix_df[date_col].iloc[-1].strftime("%Y-%m-%d")
+                                        dates=qvix_df.loc[series.index, date_col])
+        data["qvix_date"] = qvix_df.loc[series.index[-1], date_col].strftime("%Y-%m-%d")
 
     # USD/CNY 汇率 (BOC 中间价单位是"100美元换人民币"，需除100)
     fx_df = _try("汇率", lambda: _ak_call("fx_central_parity_safe", "currency_boc_safe"))
