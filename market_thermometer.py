@@ -24,6 +24,27 @@ def _pick_col(df: pd.DataFrame, candidates):
     raise KeyError(f"未找到列，候选: {candidates}，实际列: {list(df.columns)}")
 
 
+def _ak_call(*names, **kwargs):
+    """按顺序尝试 akshare 接口名并返回结果。
+
+    akshare 1.20.4x 起批量改名/下线了部分接口（旧名调用会抛 AttributeError），
+    新名与旧名哪个存在就用哪个，保证本地旧版与云端新版都能跑。
+    """
+    missing, errors = [], []
+    for name in names:
+        fn = getattr(ak, name, None)
+        if fn is None:
+            missing.append(name)
+            continue
+        try:
+            return fn(**kwargs)
+        except Exception as e:  # 该数据源本次失败，继续尝试下一个名字
+            errors.append(f"{name}: {e}")
+    if errors:
+        raise RuntimeError("；".join(errors))
+    raise AttributeError(f"akshare 中不存在接口: {', '.join(missing)}")
+
+
 def _rank_score(series, current, invert=False, window_days=None, dates=None):
     """计算 current 在 series 历史序列中的百分位 (0-100)。
     invert=True 时反转（值越小越热）。window_days 用于限定历史窗口。"""
@@ -105,7 +126,7 @@ def fetch_market_data():
         data["pe_date"] = latest["date"].strftime("%Y-%m-%d")
 
     # 上证指数（真实数据）
-    sh_df = _try("上证指数", lambda: ak.stock_zh_index_daily(symbol="sh000001"))
+    sh_df = _try("上证指数", lambda: _ak_call("index_zh_daily_sina", "stock_zh_index_daily", symbol="sh000001"))
     if sh_df is not None:
         sh_df["date"] = pd.to_datetime(sh_df["date"])
         sh_df = sh_df.sort_values("date")
@@ -118,7 +139,7 @@ def fetch_market_data():
             data["index_date"] = sh_df["date"].iloc[-1].strftime("%Y-%m-%d")
 
     # 融资融券余额
-    margin_df = _try("融资融券", lambda: ak.macro_china_market_margin_sh())
+    margin_df = _try("融资融券", lambda: _ak_call("stock_margin_sse_js", "macro_china_market_margin_sh"))
     if margin_df is not None:
         col = _pick_col(margin_df, ["融资余额", "rzye"])
         date_col = _pick_col(margin_df, ["日期", "date", "opdate"])
@@ -144,7 +165,7 @@ def fetch_market_data():
 
     # ===== 资金维度 =====
     # 10Y 国债收益率
-    bond_df = _try("国债收益率", lambda: ak.bond_zh_us_rate())
+    bond_df = _try("国债收益率", lambda: _ak_call("bond_zh_us_yield_em", "bond_zh_us_rate"))
     if bond_df is not None:
         col = _pick_col(bond_df, ["中国国债收益率10年", "10年", "q_10y"])
         date_col = _pick_col(bond_df, ["日期", "date"])
@@ -157,7 +178,7 @@ def fetch_market_data():
         data["yield_date"] = bond_df[date_col].iloc[-1].strftime("%Y-%m-%d")
 
     # M2 同比 & M1 同比（剪刀差）
-    m2_df = _try("M2货币供应", lambda: ak.macro_china_money_supply())
+    m2_df = _try("M2货币供应", lambda: _ak_call("macro_china_money_supply_em", "macro_china_money_supply"))
     if m2_df is not None:
         m2_col = _pick_col(m2_df, ["货币和准货币(M2)-同比增长"])
         m1_col = _pick_col(m2_df, ["货币(M1)-同比增长"])
@@ -169,7 +190,7 @@ def fetch_market_data():
         data["money_date"] = str(m2_df[date_col].iloc[-1])
 
     # 社融规模增量
-    sf_df = _try("社会融资规模", lambda: ak.macro_china_shrzgm())
+    sf_df = _try("社会融资规模", lambda: _ak_call("macro_china_social_financing", "macro_china_shrzgm"))
     if sf_df is not None:
         col = _pick_col(sf_df, ["社会融资规模增量"])
         date_col = _pick_col(sf_df, ["月份", "date", "日期"])
@@ -190,7 +211,8 @@ def fetch_market_data():
             data["social_finance_date"] = str(sf_df[date_col].iloc[-1])
 
     # Shibor 隔夜
-    shibor_df = _try("Shibor", lambda: ak.rate_interbank(
+    shibor_df = _try("Shibor", lambda: _ak_call(
+        "interest_rate_interbank_em", "rate_interbank",
         market="上海银行同业拆借市场", symbol="Shibor人民币", indicator="隔夜"))
     if shibor_df is not None:
         col = _pick_col(shibor_df, ["利率"])
@@ -204,17 +226,27 @@ def fetch_market_data():
         data["shibor_date"] = shibor_df[date_col].iloc[-1].strftime("%Y-%m-%d")
 
     # LPR
-    lpr_df = _try("LPR", lambda: ak.macro_china_lpr())
+    lpr_df = _try("LPR", lambda: _ak_call("interest_rate_lpr_em", "macro_china_lpr"))
     if lpr_df is not None:
-        data["lpr_1y"] = float(lpr_df["LPR1Y"].iloc[-1])
-        data["lpr_5y"] = float(lpr_df["LPR5Y"].iloc[-1])
-        # 是否较上次下调
-        if len(lpr_df) >= 2:
-            delta = lpr_df["LPR1Y"].iloc[-1] - lpr_df["LPR1Y"].iloc[-2]
-            data["lpr_trend"] = "下调" if delta < 0 else ("上调" if delta > 0 else "持平")
-        else:
-            data["lpr_trend"] = "—"
-        data["lpr_date"] = str(lpr_df["TRADE_DATE"].iloc[-1])
+        # 新接口列名为「1年期LPR / 5年期以上LPR」，旧接口为「LPR1Y / LPR5Y」
+        c1 = _pick_col(lpr_df, ["1年期LPR", "LPR1Y"])
+        c5 = _pick_col(lpr_df, ["5年期以上LPR", "LPR5Y"])
+        lpr_date_col = _pick_col(lpr_df, ["日期", "TRADE_DATE", "date"])
+        lpr_df = lpr_df.copy()
+        lpr_df[lpr_date_col] = pd.to_datetime(lpr_df[lpr_date_col], errors="coerce")
+        lpr_df = lpr_df.sort_values(lpr_date_col)
+        s1 = pd.to_numeric(lpr_df[c1], errors="coerce").dropna()
+        s5 = pd.to_numeric(lpr_df[c5], errors="coerce").dropna()
+        if len(s1) > 0:
+            data["lpr_1y"] = float(s1.iloc[-1])
+            data["lpr_5y"] = float(s5.iloc[-1]) if len(s5) > 0 else float("nan")
+            # 是否较上次下调
+            if len(s1) >= 2:
+                delta = s1.iloc[-1] - s1.iloc[-2]
+                data["lpr_trend"] = "下调" if delta < 0 else ("上调" if delta > 0 else "持平")
+            else:
+                data["lpr_trend"] = "—"
+            data["lpr_date"] = lpr_df[lpr_date_col].iloc[-1].strftime("%Y-%m-%d")
 
     # ===== 宏观维度 =====
     gdp_df = _try("GDP", lambda: ak.macro_china_gdp())
@@ -235,16 +267,17 @@ def fetch_market_data():
         data["pmi_nonmfg"] = float(pd.to_numeric(pmi_df[nonmfg_col], errors="coerce").iloc[-1])
         data["pmi_date"] = str(pmi_df[date_col].iloc[-1])
 
-    ip_df = _try("工业增加值", lambda: ak.macro_china_industrial_production_yoy())
+    ip_df = _try("工业增加值", lambda: _ak_call(
+        "macro_china_industrial_value_added", "macro_china_industrial_production_yoy"))
     if ip_df is not None:
-        col = _pick_col(ip_df, ["今值"])
-        date_col = _pick_col(ip_df, ["日期", "date"])
+        # 新接口列名为「同比增长 / 月份」，旧接口为「今值 / 日期」
+        col = _pick_col(ip_df, ["同比增长", "今值"])
+        date_col = _pick_col(ip_df, ["月份", "日期", "date"])
         ip_df = ip_df.sort_values(date_col)
         series = pd.to_numeric(ip_df[col], errors="coerce").dropna()
         if len(series) > 0:
             data["industrial_yoy"] = float(series.iloc[-1])
-            valid_idx = series.index[-1]
-            data["industrial_date"] = str(ip_df[date_col].iloc[valid_idx])
+            data["industrial_date"] = str(ip_df[date_col].iloc[-1])
         else:
             data["industrial_yoy"] = float("nan")
             data["industrial_date"] = str(ip_df[date_col].iloc[-1])
@@ -305,7 +338,7 @@ def fetch_market_data():
             data["new_fund_date"] = str(monthly.index[-1])
 
     # 主力资金净流入（近5日均值）— 主方案：市场资金流向
-    flow_df = _try("主力资金流向", lambda: ak.stock_market_fund_flow())
+    flow_df = _try("主力资金流向", lambda: _ak_call("stock_fund_flow_market_em", "stock_market_fund_flow"))
     main_flow_ok = False
     if flow_df is not None:
         try:
@@ -324,7 +357,7 @@ def fetch_market_data():
 
     # 主力资金备选：行业资金流汇总（加总所有行业净额≈全市场主力净流入）
     if not main_flow_ok:
-        ind_flow_df = _try("行业资金流汇总", lambda: ak.stock_fund_flow_industry(symbol="即时"))
+        ind_flow_df = _try("行业资金流汇总", lambda: _ak_call("stock_fund_flow_industry_ths", "stock_fund_flow_industry", symbol="即时"))
         if ind_flow_df is not None:
             try:
                 net_col = _pick_col(ind_flow_df, ["净额", "净流入", "net"])
@@ -439,7 +472,7 @@ def fetch_market_data():
         data["qvix_date"] = qvix_df[date_col].iloc[-1].strftime("%Y-%m-%d")
 
     # USD/CNY 汇率 (BOC 中间价单位是"100美元换人民币"，需除100)
-    fx_df = _try("汇率", lambda: ak.currency_boc_safe())
+    fx_df = _try("汇率", lambda: _ak_call("fx_central_parity_safe", "currency_boc_safe"))
     if fx_df is not None:
         col = _pick_col(fx_df, ["美元"])
         date_col = _pick_col(fx_df, ["日期", "date"])
@@ -456,9 +489,9 @@ def fetch_market_data():
 
     # ===== 市场风格 =====
     # 沪深300 vs 中证1000 (大小盘)
-    hs300_df = _try("沪深300", lambda: ak.stock_zh_index_daily(symbol="sh000300"))
-    zz1000_df = _try("中证1000", lambda: ak.stock_zh_index_daily(symbol="sh000852"))
-    cyb_df = _try("创业板指", lambda: ak.stock_zh_index_daily(symbol="sz399006"))
+    hs300_df = _try("沪深300", lambda: _ak_call("index_zh_daily_sina", "stock_zh_index_daily", symbol="sh000300"))
+    zz1000_df = _try("中证1000", lambda: _ak_call("index_zh_daily_sina", "stock_zh_index_daily", symbol="sh000852"))
+    cyb_df = _try("创业板指", lambda: _ak_call("index_zh_daily_sina", "stock_zh_index_daily", symbol="sz399006"))
     
     if hs300_df is not None and zz1000_df is not None:
         hs300_last = float(hs300_df["close"].iloc[-1])
@@ -860,7 +893,7 @@ def _hist_try(name, fn):
         st.caption(f"⚠️ {name}: {e}")
         return None
 
-sh_hist = _hist_try("上证历史", lambda: ak.stock_zh_index_daily(symbol="sh000001"))
+sh_hist = _hist_try("上证历史", lambda: _ak_call("index_zh_daily_sina", "stock_zh_index_daily", symbol="sh000001"))
 if sh_hist is not None:
     sh_hist["date"] = pd.to_datetime(sh_hist["date"])
     sh_hist = sh_hist.sort_values("date")
